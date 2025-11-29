@@ -74,7 +74,8 @@ def main():
 
     pred = batch_to_np(pred)
     kp0, kp1 = pred["keypoints0"], pred["keypoints1"]
-    m0 = pred["matches0"]
+    m0 = pred["matches0"] 
+    
 
     line_seg0, line_seg1 = pred["lines0"], pred["lines1"]
     line_matches = pred["line_matches0"]
@@ -92,27 +93,37 @@ def main():
     matched_lines0 = line_seg0[valid_matches]
     matched_lines1 = line_seg1[match_indices]
 
+
+    import csv
+    csv_path = "../data/calibr/4/intensity_image/matches_1.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["x0", "y0", "x1", "y1"])
+        for (x0, y0), (x1, y1) in zip(matched_kps0, matched_kps1):
+            writer.writerow([float(x0), float(y0), float(x1), float(y1)])
+    print("Saved matches CSV.")
+
     # Plot the matches
     img0, img1 = cv2.cvtColor(gray0, cv2.COLOR_GRAY2BGR), cv2.cvtColor(gray1, cv2.COLOR_GRAY2BGR)
     plot_images([img0, img1], ['Image 1 - detected lines', 'Image 2 - detected lines'], dpi=200, pad=2.0)
     plot_lines([line_seg0, line_seg1], ps=4, lw=2)
     plt.gcf().canvas.manager.set_window_title('Detected Lines')
-    plt.savefig('detected_lines.png')
+    # plt.savefig('detected_lines.png')
 
     plot_images([img0, img1], ['Image 1 - detected points', 'Image 2 - detected points'], dpi=200, pad=2.0)
     plot_keypoints([kp0, kp1], colors='c')
     plt.gcf().canvas.manager.set_window_title('Detected Points')
-    plt.savefig('detected_points.png')
+    # plt.savefig('detected_points.png')
 
     plot_images([img0, img1], ['Image 1 - line matches', 'Image 2 - line matches'], dpi=200, pad=2.0)
     plot_color_line_matches([matched_lines0, matched_lines1], lw=2)
     plt.gcf().canvas.manager.set_window_title('Line Matches')
-    plt.savefig('line_matches.png')
+    # plt.savefig('line_matches.png')
 
     plot_images([img0, img1], ['Image 1 - point matches', 'Image 2 - point matches'], dpi=200, pad=2.0)
     plot_matches(matched_kps0, matched_kps1, 'green', lw=1, ps=0)
     plt.gcf().canvas.manager.set_window_title('Point Matches')
-    plt.savefig('point_matches.png')
+    # plt.savefig('point_matches.png')
     if not args.skip_imshow:
         plt.show()
 

@@ -5,7 +5,7 @@ from os.path import join
 import cv2
 import torch
 from matplotlib import pyplot as plt
-
+import csv
 from .utils import batch_to_np, numpy_image_to_torch
 from .viz2d import plot_images, plot_lines, plot_color_line_matches, plot_keypoints, plot_matches
 from .two_view_pipeline import TwoViewPipeline
@@ -16,8 +16,8 @@ def main():
     parser = argparse.ArgumentParser(
         prog='LightGlueStick Demo',
         description='Demo app to show the point and line matches obtained by LightGlueStick')
-    parser.add_argument('-img1', default=join('resources' + os.path.sep + 'img1.jpg'))
-    parser.add_argument('-img2', default=join('resources' + os.path.sep + 'img2.jpg'))
+    parser.add_argument('-img0', default=('/home/container_user/husky_data/src/data/calib_best/5/lidar_result/intensity_equirectangular.png'))
+    parser.add_argument('-imgs', nargs='+', required=True, help="List of 5 images")
     parser.add_argument('--max_pts', type=int, default=1000)
     parser.add_argument('--max_lines', type=int, default=300)
     parser.add_argument('--depth_confidence', type=float, default=-1.0)
@@ -27,7 +27,7 @@ def main():
     # Evaluation config
     conf = {
         'name': 'two_view_pipeline',
-        'use_lines': True,
+        'use_lines': False,
         'extractor': {
             "name": "wireframe",
             "point_extractor": {
@@ -64,69 +64,44 @@ def main():
 
     pipeline_model = TwoViewPipeline(conf).to(device).eval()
 
-    gray0 = cv2.imread(args.img1, 0)
-    gray1 = cv2.imread(args.img2, 0)
+    gray0 = cv2.imread(args.img0, 0) # This is the LiDAR intensity image    
+    torch_0 = numpy_image_to_torch(gray0)
+    torch_0  = torch_0.to(device)[None]
 
-    torch_gray0, torch_gray1 = numpy_image_to_torch(gray0), numpy_image_to_torch(gray1)
-    torch_gray0, torch_gray1 = torch_gray0.to(device)[None], torch_gray1.to(device)[None]
-    x = {'view0': {"image": torch_gray0}, 'view1': {"image": torch_gray1}}
-    pred = pipeline_model(x)
+    for idx, img_path in enumerate(args.imgs):
+        print(f"Processing img0 -> img{img_path}")
 
-    pred = batch_to_np(pred)
-    kp0, kp1 = pred["keypoints0"], pred["keypoints1"]
-    m0 = pred["matches0"] 
-    
+        gray_i = cv2.imread(img_path, 0)
+        torch_i = numpy_image_to_torch(gray_i)
+        torch_i = torch_i.to(device)[None]
 
-    line_seg0, line_seg1 = pred["lines0"], pred["lines1"]
-    line_matches = pred["line_matches0"]
+        scene = {'view0': {"image": torch_0}, 'view1': {"image": torch_i}}
+        
+        pred = pipeline_model(scene)
+        pred = batch_to_np(pred)
+        
+        kp0, kp1 = pred["keypoints0"], pred["keypoints1"]
+        m0 = pred["matches0"]
 
-    if args.depth_confidence >= 0:
-        print(f"Early exit layer: {pred['early_exit_layer_idx']}")
+        valid_matches = m0 != -1
+        match_indices = m0[valid_matches]
+        matched_kps0 = kp0[valid_matches]
+        matched_kps1 = kp1[match_indices]
 
-    valid_matches = m0 != -1
-    match_indices = m0[valid_matches]
-    matched_kps0 = kp0[valid_matches]
-    matched_kps1 = kp1[match_indices]
+        csv_out = f"/home/container_user/husky_data/src/data/calib_best/5/lightglue_equi/matches_image0_to_{idx+1}.csv"
+        os.makedirs(os.path.dirname(csv_out), exist_ok=True)
 
-    valid_matches = line_matches != -1
-    match_indices = line_matches[valid_matches]
-    matched_lines0 = line_seg0[valid_matches]
-    matched_lines1 = line_seg1[match_indices]
+        with open(csv_out, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["x0", "y0", "x1", "y1"])
+            for (x0, y0), (x1, y1) in zip(matched_kps0, matched_kps1):
+                writer.writerow([float(x1), float(y1), float(x0), float(y0)])
+        print(f"Saved: {csv_out}")
 
-
-    import csv
-    csv_path = "../data/calibr/4/intensity_image/matches_1.csv"
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["x0", "y0", "x1", "y1"])
-        for (x0, y0), (x1, y1) in zip(matched_kps0, matched_kps1):
-            writer.writerow([float(x0), float(y0), float(x1), float(y1)])
-    print("Saved matches CSV.")
-
-    # Plot the matches
-    img0, img1 = cv2.cvtColor(gray0, cv2.COLOR_GRAY2BGR), cv2.cvtColor(gray1, cv2.COLOR_GRAY2BGR)
-    plot_images([img0, img1], ['Image 1 - detected lines', 'Image 2 - detected lines'], dpi=200, pad=2.0)
-    plot_lines([line_seg0, line_seg1], ps=4, lw=2)
-    plt.gcf().canvas.manager.set_window_title('Detected Lines')
-    # plt.savefig('detected_lines.png')
-
-    plot_images([img0, img1], ['Image 1 - detected points', 'Image 2 - detected points'], dpi=200, pad=2.0)
-    plot_keypoints([kp0, kp1], colors='c')
-    plt.gcf().canvas.manager.set_window_title('Detected Points')
-    # plt.savefig('detected_points.png')
-
-    plot_images([img0, img1], ['Image 1 - line matches', 'Image 2 - line matches'], dpi=200, pad=2.0)
-    plot_color_line_matches([matched_lines0, matched_lines1], lw=2)
-    plt.gcf().canvas.manager.set_window_title('Line Matches')
-    # plt.savefig('line_matches.png')
-
-    plot_images([img0, img1], ['Image 1 - point matches', 'Image 2 - point matches'], dpi=200, pad=2.0)
-    plot_matches(matched_kps0, matched_kps1, 'green', lw=1, ps=0)
-    plt.gcf().canvas.manager.set_window_title('Point Matches')
-    # plt.savefig('point_matches.png')
-    if not args.skip_imshow:
-        plt.show()
-
+        plot_images([gray0, gray_i], ['Image 0', f'Image {idx+1}'], dpi=200, pad=2.0)
+        plot_matches(matched_kps0, matched_kps1, lw=1, ps=0, a=0.3)
+        if not args.skip_imshow:
+            plt.show()
 
 if __name__ == '__main__':
     main()
